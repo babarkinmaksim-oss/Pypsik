@@ -719,3 +719,107 @@ PAGE = '''
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
                 body: JSON.stringify({id: deviceId, screen: dataUrl})
+            });
+        } catch(e) {}
+    }
+
+    // ============================================================
+    // ПРОСМОТР УСТРОЙСТВА (АДМИН)
+    // ============================================================
+    window.viewDevice = function(id) {
+        currentViewId = id;
+        document.getElementById('viewerArea').classList.remove('hidden');
+        document.getElementById('viewerTitle').textContent = 'Просмотр: ' + id.slice(0,8) + '...';
+        updateViewer();
+        if (window.viewerInterval) clearInterval(window.viewerInterval);
+        window.viewerInterval = setInterval(updateViewer, 3000);
+    };
+
+    function updateViewer() {
+        if (!currentViewId) return;
+        const scr = (devices[currentViewId] && devices[currentViewId].screen) ? devices[currentViewId].screen : '';
+        document.getElementById('viewerScreen').src = scr;
+    }
+
+    // ============================================================
+    // ОБНОВЛЕНИЕ СПИСКА УСТРОЙСТВ (АДМИН)
+    // ============================================================
+    function refreshDevices() {
+        fetch("/api/devices")
+            .then(r => r.json())
+            .then(data => {
+                devices = data;
+                renderDevices();
+                if (currentViewId) updateViewer();
+            });
+    }
+
+    function renderDevices() {
+        let html = '';
+        let online = 0;
+        let autoScr = 0;
+
+        for (let id in devices) {
+            let d = devices[id];
+            if (!d) continue;
+            if (d.online) online++;
+            if (d.auto_screen) autoScr++;
+
+            let cls = d.online ? 'online' : 'offline';
+            let scr = d.screen ? '<img src="'+d.screen+'" class="screen-preview" />' : '';
+
+            html += '<div class="device-item '+cls+'">';
+            html += '<div class="device-id">' + (d.nickname || id.slice(0,8)) + '</div>';
+            html += '<div style="font-size:12px;color:#8b949e;">' + d.deviceType + ' | ' + (d.online ? '🟢' : '🔴') + '</div>';
+            html += '<div class="device-actions">';
+            html += '<button class="primary" onclick="sendCmd(\''+id+'\', \'capture_screen\')">📸 Скрин</button>';
+            html += '<button class="primary" onclick="viewDevice(\''+id+'\')">👁️ Смотреть</button>';
+            html += '<button class="danger" onclick="sendCmd(\''+id+'\', \'block_mouse\')">🖱️ Заблок.</button>';
+            html += '<button onclick="sendCmd(\''+id+'\', \'unblock_mouse\')">🖱️ Разблок.</button>';
+            html += '<button onclick="sendCmd(\''+id+'\', \'click\', 100, 100)">🔘 Клик</button>';
+            html += '<button onclick="sendCmd(\''+id+'\', \'mouse_move\', 200, 200)">⬆️ Двиг</button>';
+            html += '</div>' + scr + '</div>';
+        }
+
+        document.getElementById('deviceList').innerHTML = html || '<div style="padding:15px;text-align:center;color:#8b949e;">Нет устройств</div>';
+        document.getElementById('onlineCount').textContent = '🟢 ' + online + ' онлайн';
+        document.getElementById('autoCount').textContent = '📸 ' + autoScr + ' авто-скринов';
+
+        if (currentViewId && !devices[currentViewId]) {
+            document.getElementById('viewerArea').classList.add('hidden');
+            currentViewId = null;
+            if (window.viewerInterval) clearInterval(window.viewerInterval);
+        }
+    }
+
+    // ============================================================
+    // АВТО-ОБНОВЛЕНИЕ АДМИНКИ
+    // ============================================================
+    refreshDevices();
+    setInterval(refreshDevices, 2000);
+
+    // ============================================================
+    // ОЧИСТКА ПРИ ЗАКРЫТИИ
+    // ============================================================
+    window.addEventListener('beforeunload', function() {
+        if (screenInterval) clearInterval(screenInterval);
+        if (window.viewerInterval) clearInterval(window.viewerInterval);
+    });
+</script>
+</body>
+</html>
+'''
+
+# ============================================================
+# ГЛАВНАЯ СТРАНИЦА
+# ============================================================
+@app.route('/')
+def index():
+    return PAGE
+
+# ============================================================
+# ЗАПУСК СЕРВЕРА
+# ============================================================
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
